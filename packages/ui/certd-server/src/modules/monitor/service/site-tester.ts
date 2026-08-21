@@ -3,6 +3,7 @@ import { merge } from "lodash-es";
 import https from "https";
 import { PeerCertificate } from "tls";
 import { DnsCustom } from "./dns-custom.js";
+import { HostWhitelist } from "../../../utils/host-whitelist.js";
 
 export type SiteTestReq = {
   host: string; // 只用域名部分
@@ -12,6 +13,11 @@ export type SiteTestReq = {
   ipAddress?: string;
 
   customDns?: DnsCustom;
+
+  /**
+   * 站点监控目标白名单（SSRF防护），逗号分隔，为空表示不限制
+   */
+  whitelist?: string;
 };
 
 export type SiteTestRes = {
@@ -20,8 +26,16 @@ export type SiteTestRes = {
 
 export class SiteTester {
   async test(req: SiteTestReq): Promise<SiteTestRes> {
+    // SSRF防护：白名单非空时，目标（含指定IP）必须在白名单内，否则拒绝发起连接
+    const whitelist = new HostWhitelist(req.whitelist);
+    whitelist.assertAllowed(req.host);
+    if (req.ipAddress) {
+      whitelist.assertAllowed(req.ipAddress);
+    }
+
     const req_ = { ...req };
     delete req_.customDns;
+    delete req_.whitelist;
     logger.info("测试站点:", JSON.stringify(req_));
     const maxRetryTimes = req.retryTimes == null ? 3 : req.retryTimes;
     let tryCount = 0;

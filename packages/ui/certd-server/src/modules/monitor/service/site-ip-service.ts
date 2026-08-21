@@ -1,4 +1,4 @@
-import { Inject, Provide, Scope, ScopeEnum } from "@midwayjs/core";
+import { Inject, Provide, Scope, ScopeEnum, Config } from "@midwayjs/core";
 import { BaseService, SysSettingsService } from "@certd/lib-server";
 import { InjectEntityModel } from "@midwayjs/typeorm";
 import { Repository } from "typeorm";
@@ -36,6 +36,12 @@ export class SiteIpService extends BaseService<SiteIpEntity> {
 
   @Inject()
   userSettingsService: UserSettingsService;
+
+  /**
+   * 安全配置，见 config.default.ts 的 security 配置段
+   */
+  @Config("security")
+  securityConfig: { siteMonitorWhitelist?: string };
 
   //@ts-ignore
   getRepository() {
@@ -145,6 +151,7 @@ export class SiteIpService extends BaseService<SiteIpEntity> {
         port: port,
         retryTimes: retryTimes ?? 3,
         ipAddress: entity.ipAddress,
+        whitelist: this.securityConfig?.siteMonitorWhitelist,
       });
 
       const certi: PeerCertificate = res.certificate;

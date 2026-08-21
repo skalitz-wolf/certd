@@ -6,6 +6,7 @@ import { EabAccess } from "../../../access/index.js";
 import path from "path";
 import JSZip from "jszip";
 import { PrivateKeyType } from "./dns.js";
+import { assertSafeLegoArg, assertValidLegoAcmeServer, assertValidLegoDnsType, assertValidLegoDomain, assertValidLegoEab, assertValidLegoEmail, assertValidLegoPrivateKeyType } from "./lego-security.js";
 
 @IsTaskPlugin({
   name: "CertApplyLego",
@@ -137,6 +138,20 @@ export class CertApplyLegoPlugin extends CertApplyBasePlugin {
   async onInit(): Promise<void> {}
 
   async doCertApply() {
+    // 命令注入防护：校验所有用户可控参数，防止通过 shell 注入执行任意命令（RCE）
+    assertValidLegoEmail(this.email);
+    assertValidLegoDnsType(this.dnsType);
+    assertValidLegoPrivateKeyType(this.privateKeyType);
+    assertValidLegoAcmeServer(this.acmeServer);
+    for (const domain of this.domains || []) {
+      assertValidLegoDomain(domain);
+    }
+    assertSafeLegoArg(this.customArgs, "自定义LEGO全局参数");
+    assertSafeLegoArg(this.customCommandOptions, "自定义LEGO签名参数");
+    if (this.eab) {
+      assertValidLegoEab(this.eab.kid, this.eab.hmacKey);
+    }
+
     const env: any = {};
     const env_lines = this.environment.split("\n");
     for (const line of env_lines) {

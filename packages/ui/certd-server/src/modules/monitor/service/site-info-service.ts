@@ -4,7 +4,7 @@ import { AccessService, BaseService, Constants, isEnterprise, NeedSuiteException
 import { Pager } from "@certd/pipeline";
 import { createDnsProvider, dnsProviderRegistry, DomainParser } from "@certd/plugin-lib";
 import { isComm, isPlus } from "@certd/plus-core";
-import { Inject, Provide, Scope, ScopeEnum } from "@midwayjs/core";
+import { Inject, Provide, Scope, ScopeEnum, Config } from "@midwayjs/core";
 import { InjectEntityModel } from "@midwayjs/typeorm";
 import dayjs from "dayjs";
 import { merge } from "lodash-es";
@@ -63,6 +63,12 @@ export class SiteInfoService extends BaseService<SiteInfoEntity> {
 
   @Inject()
   cron: Cron;
+
+  /**
+   * 安全配置，见 config.default.ts 的 security 配置段
+   */
+  @Config("security")
+  securityConfig: { siteMonitorWhitelist?: string };
 
   //@ts-ignore
   getRepository() {
@@ -160,6 +166,7 @@ export class SiteInfoService extends BaseService<SiteInfoEntity> {
         retryTimes,
         customDns,
         ipAddress: site.ipAddress,
+        whitelist: this.securityConfig?.siteMonitorWhitelist,
       });
 
       const certi: PeerCertificate = res.certificate;
@@ -806,7 +813,6 @@ export class SiteInfoService extends BaseService<SiteInfoEntity> {
   }
 
   async batchDelete(ids: number[], userId: number, projectId?: number): Promise<number> {
-
     ids = this.filterIds(ids);
     const userProjectQuery = this.buildUserProjectQuery(userId, projectId);
     await this.repository.delete({

@@ -124,6 +124,18 @@ const development = {
   system: {
     resetAdminPasswd: false,
   },
+  /**
+   * 安全相关配置
+   */
+  security: {
+    /**
+     * 站点监控目标白名单（SSRF防护），逗号分隔
+     * 支持格式：精确域名 example.com、通配域名 *.example.com、精确IP、CIDR网段 10.0.0.0/8
+     * 为空表示不启用限制
+     * 可通过环境变量覆盖：certd_security_siteMonitorWhitelist=example.com,*.example.com,10.0.0.0/8
+     */
+    siteMonitorWhitelist: "",
+  },
   plus: {
     serverBaseUrls: ["http://127.0.0.1:11007"],
   },
