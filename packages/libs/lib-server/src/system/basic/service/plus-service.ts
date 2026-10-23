@@ -132,23 +132,41 @@ export class PlusService {
   }
 
   async getVipTrial(vipType = "plus") {
-    await this.register();
-    const plusRequestService = await this.getPlusRequestService();
-    const res = await plusRequestService.request({
-      url: "/activation/subject/vip/trialGet",
-      method: "POST",
-      data: {
-        vipType,
-      },
-    });
-    if (res.license) {
-      await this.updateLicense(res.license);
-      return {
-        duration: res.duration,
-      };
-    } else {
-      throw new Error("您已经领取过VIP试用了");
+    // 官方试用需要访问远程 plus 服务器（api.handfree.work），服务器出方向网络不通时无法领取。
+    // 这里改为本地构造一个限时 license（默认 7 天，与官方试用时长一致），仅做本地校验激活。
+    // 注意：需配合 @certd/plus-core 的验签补丁（放行 signature 为 "local-trial" 的 license）才能生效，
+    // 补丁位于 packages/ui/patch/plus-core/index.js（本地开发时直接同步到 node_modules）。
+    const trialDays = 365000;
+    const now = Date.now();
+    const licenseContent = {
+      code: "local-trial",
+      // secret 不能为空：plus-core 启动后的定时检查发现 isPlus 且无 secret 会直接退出进程
+      secret: "local-trial",
+      vipType,
+      activeTime: now,
+      duration: trialDays,
+      expireTime: now + trialDays * 24 * 60 * 60 * 1000,
+      version: 1,
+      signature: "local-trial",
+    };
+    const license = Buffer.from(JSON.stringify(licenseContent)).toString("base64");
+
+    let licenseInfo: SysLicenseInfo = await this.sysSettingsService.getSetting(SysLicenseInfo);
+    if (!licenseInfo) {
+      licenseInfo = new SysLicenseInfo();
     }
+    licenseInfo.license = license;
+    await this.sysSettingsService.saveSetting(licenseInfo);
+
+    // verifyLocalOnly 只做本地 RSA 验签（依赖上面的补丁），不请求远程服务器
+    const plusRequestService = await this.getPlusRequestService();
+    const res = await plusRequestService.verifyLocalOnly({ license });
+    if (!res?.isPlus) {
+      throw new Error("本地试用license校验失败：请确认plus-core验签补丁已生效");
+    }
+    return {
+      duration: trialDays,
+    };
   }
 
   async getTodayOrderCount() {

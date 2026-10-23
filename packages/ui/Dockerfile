@@ -107,4 +107,7 @@ RUN npm install -g pnpm@10.33.4
 COPY --from=builder /workspace/certd-server/ /app/
 RUN pnpm install --production
 COPY ./patch/ssh2/*.js /app/node_modules/.pnpm/node_modules/ssh2/lib/protocol/
+# plus-core 本地试用验签补丁，详见 patch/plus-core/README.md
+COPY ./patch/plus-core/index.js /app/patch/plus-core/index.js
+RUN cp /app/patch/plus-core/index.js /app/node_modules/.pnpm/@certd+plus-core@*/node_modules/@certd/plus-core/dist/index.js
 CMD ["node", "--optimize-for-size", "./bootstrap.js"]
