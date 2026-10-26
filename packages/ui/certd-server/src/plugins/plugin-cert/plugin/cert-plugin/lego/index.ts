@@ -6,7 +6,16 @@ import { EabAccess } from "../../../access/index.js";
 import path from "path";
 import JSZip from "jszip";
 import { PrivateKeyType } from "./dns.js";
-import { assertSafeLegoArg, assertValidLegoAcmeServer, assertValidLegoDnsType, assertValidLegoDomain, assertValidLegoEab, assertValidLegoEmail, assertValidLegoPrivateKeyType } from "./lego-security.js";
+import {
+  assertSafeLegoArg,
+  assertSafeLegoEnvironment,
+  assertValidLegoAcmeServer,
+  assertValidLegoDnsType,
+  assertValidLegoDomain,
+  assertValidLegoEab,
+  assertValidLegoEmail,
+  assertValidLegoPrivateKeyType,
+} from "./lego-security.js";
 
 @IsTaskPlugin({
   name: "CertApplyLego",
@@ -148,15 +157,23 @@ export class CertApplyLegoPlugin extends CertApplyBasePlugin {
     }
     assertSafeLegoArg(this.customArgs, "自定义LEGO全局参数");
     assertSafeLegoArg(this.customCommandOptions, "自定义LEGO签名参数");
+    assertSafeLegoEnvironment(this.environment);
     if (this.eab) {
       assertValidLegoEab(this.eab.kid, this.eab.hmacKey);
     }
 
     const env: any = {};
-    const env_lines = this.environment.split("\n");
+    const env_lines = (this.environment || "").split("\n");
     for (const line of env_lines) {
-      const [key, value] = line.trim().split("=");
-      env[key] = value.trim();
+      const trimmed = line.trim();
+      if (!trimmed) {
+        // 跳过空行，否则会解析出空 key 并在 value.trim() 处报错
+        continue;
+      }
+      // 用 indexOf 而不是 split("=")，值本身可能含有 = （如 base64 密钥）
+      const eq = trimmed.indexOf("=");
+      const key = trimmed.slice(0, eq).trim();
+      env[key] = trimmed.slice(eq + 1).trim();
     }
 
     let domainArgs = "";

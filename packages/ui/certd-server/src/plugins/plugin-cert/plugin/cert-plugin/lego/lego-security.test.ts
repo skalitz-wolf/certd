@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 
-import { assertSafeLegoArg, assertValidLegoAcmeServer, assertValidLegoDnsType, assertValidLegoDomain, assertValidLegoEab, assertValidLegoEmail, assertValidLegoPrivateKeyType } from "./lego-security.js";
+import { assertSafeLegoArg, assertSafeLegoEnvironment, assertValidLegoAcmeServer, assertValidLegoDnsType, assertValidLegoDomain, assertValidLegoEab, assertValidLegoEmail, assertValidLegoPrivateKeyType } from "./lego-security.js";
 
 describe("lego-security", () => {
   describe("assertSafeLegoArg（自定义参数）", () => {
@@ -120,6 +120,43 @@ describe("lego-security", () => {
     it("拒绝包含 shell 字符的凭证", () => {
       assert.throws(() => assertValidLegoEab("kid; id", "hmac"), /kid/);
       assert.throws(() => assertValidLegoEab("kid", "hmac$(id)"), /hmacKey/);
+    });
+  });
+
+  describe("assertSafeLegoEnvironment（环境变量）", () => {
+    it("正常的 DNS 凭证环境变量可通过", () => {
+      assertSafeLegoEnvironment("ALICLOUD_ACCESS_KEY=LTAI5tAbc123");
+      assertSafeLegoEnvironment("ALICLOUD_SECRET_KEY=abc123+/=\nTENCENTCLOUD_SECRET_ID=AKIDxyz");
+      assertSafeLegoEnvironment("");
+      assertSafeLegoEnvironment(undefined);
+    });
+
+    it("拒绝非法变量名", () => {
+      assert.throws(() => assertSafeLegoEnvironment("1BAD=x"), /变量名/);
+      assert.throws(() => assertSafeLegoEnvironment("BAD-NAME=x"), /变量名/);
+      assert.throws(() => assertSafeLegoEnvironment("NOEQUALS"), /格式不正确/);
+    });
+
+    it("拒绝可用于 %VAR% 注入的值（Windows cmd 展开）", () => {
+      // 审查里的可复现 PoC：environment 写入注入载荷，customArgs 里用 %X% 触发
+      assert.throws(() => assertSafeLegoEnvironment("X=&& echo INJECTED_FULL"), /不允许的字符/);
+      assert.throws(() => assertSafeLegoEnvironment('X=" & echo INJECTED & "'), /不允许的字符/);
+      assert.throws(() => assertSafeLegoEnvironment("X=`id`"), /不允许的字符/);
+      assert.throws(() => assertSafeLegoEnvironment("X=$(id)"), /不允许的字符/);
+      assert.throws(() => assertSafeLegoEnvironment("X=a\rb"), /不允许的字符/);
+    });
+  });
+
+  describe("assertSafeLegoArg 拦截 %VAR% 触发链", () => {
+    it("自定义参数不再允许 %", () => {
+      // % 被移出字符白名单，断了 %X% 引用环境变量这条路
+      assert.throws(() => assertSafeLegoArg("%X%", "自定义参数"), /不允许的字符/);
+    });
+  });
+
+  describe("assertValidLegoAcmeServer 拦截 %", () => {
+    it("ACME 地址不允许 %（拼接时未加引号）", () => {
+      assert.throws(() => assertValidLegoAcmeServer("https://acme.example.com/%X%"), /不允许的特殊字符/);
     });
   });
 });

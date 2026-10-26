@@ -14,8 +14,25 @@
  * 校验失败时抛出异常，命令不会执行。
  */
 
-/** 自定义参数允许的字符集：字母数字 + 常见参数符号（-、_、=、:、.、,、/、引号、@、%、+、空格） */
-const LEGO_ARG_SAFE_CHARS = /^[A-Za-z0-9 _\-=:.,/'"@%+]+$/;
+/**
+ * 自定义参数允许的字符集：字母数字 + 常见参数符号（-、_、=、:、.、,、/、引号、@、+、空格）。
+ *
+ * 注意这里**故意不含 `%`**：Windows 的 cmd.exe 会在任何位置（含双引号内）展开 %VAR%，
+ * 而 environment 字段可被用户设置为 `X=&& echo INJECTED`，再在参数里写 %X% 即可注入。
+ * 去掉 % 后这条链断掉，且 lego 参数本身不需要 %。
+ */
+const LEGO_ARG_SAFE_CHARS = /^[A-Za-z0-9 _\-=:.,/'"@+]+$/;
+
+/** 环境变量名：POSIX 标识符格式 */
+const ENV_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * 环境变量值：拒绝 shell 元字符和换行。
+ *
+ * 即使环境变量名合法，值里的 `%X%` 展开、反引号、$() 仍可能在后续命令拼接中生效，
+ * 因此值也必须收紧。DNS 凭证类环境变量（AK/SK、token）只包含字母数字和常见符号。
+ */
+const ENV_VALUE_UNSAFE = /[%;|&`$()<>\r\n'"\\]/;
 
 /** 邮箱格式 */
 const EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
@@ -50,7 +67,7 @@ export function assertSafeLegoArg(value: string | undefined, fieldName: string) 
   if (/\r|\n/.test(value)) {
     throw new Error(`${fieldName}不能包含换行符`);
   }
-  assertTrue(LEGO_ARG_SAFE_CHARS.test(value), `${fieldName}包含不允许的字符，仅允许字母、数字及 - _ = : . , / ' " @ % + 和空格，禁止 ; | & \` $ ( ) < > * ? { } 等特殊字符`);
+  assertTrue(LEGO_ARG_SAFE_CHARS.test(value), `${fieldName}包含不允许的字符，仅允许字母、数字及 - _ = : . , / ' " @ + 和空格，禁止 ; | & \` $ ( ) < > * ? { } % 等特殊字符`);
 }
 
 /**
@@ -95,7 +112,36 @@ export function assertValidLegoAcmeServer(acmeServer: string | undefined) {
     throw new Error(`ACME服务地址[${acmeServer}]格式不正确，必须是以 https:// 开头的合法地址`);
   }
   assertTrue(url.protocol === "https:", `ACME服务地址[${acmeServer}]必须使用 https 协议`);
-  assertTrue(!/[\r\n;|&`$()<>]/.test(acmeServer), "ACME服务地址包含不允许的特殊字符");
+  // `%` 必须拦：该字段在拼接命令时没有加引号（`--server ${this.acmeServer}`），
+  // Windows 下 %VAR% 会展开成环境变量的值，可借此注入。
+  assertTrue(!/[\r\n;|&`$()<>%]/.test(acmeServer), "ACME服务地址包含不允许的特殊字符");
+}
+
+/**
+ * 校验自定义环境变量（environment 字段，每行 KEY=VALUE）。
+ *
+ * 该字段会被原样传给 spawn 的 env，且命令串是 shell 执行的，
+ * Windows 下 `%KEY%` 会在任意位置展开，因此 key 和 value 都要收紧。
+ *
+ * @param environment 多行文本
+ */
+export function assertSafeLegoEnvironment(environment: string | undefined) {
+  if (!environment) {
+    return;
+  }
+  const lines = environment.split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const eq = line.indexOf("=");
+    assertTrue(eq > 0, `环境变量[${line}]格式不正确，应为 KEY=VALUE`);
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    assertTrue(ENV_KEY_REGEX.test(key), `环境变量名[${key}]不合法，仅允许字母、数字和下划线，且不能以数字开头`);
+    assertTrue(!ENV_VALUE_UNSAFE.test(value), `环境变量[${key}]的值包含不允许的字符，禁止 ; % | & \` $ ( ) < > 引号 和换行`);
+  }
 }
 
 /**

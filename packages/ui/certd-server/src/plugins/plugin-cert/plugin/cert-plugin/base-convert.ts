@@ -2,6 +2,7 @@ import { AbstractTaskPlugin, IContext, Step, TaskInput, TaskOutput } from "@cert
 import { CertConverter, CertReader, EVENT_CERT_APPLY_SUCCESS } from "@certd/plugin-lib";
 import dayjs from "dayjs";
 import type { CertInfo } from "./acme.js";
+import { assertSafePfxConvert } from "./convert-security.js";
 
 export abstract class CertApplyBaseConvertPlugin extends AbstractTaskPlugin {
   @TaskInput({
@@ -102,6 +103,8 @@ export abstract class CertApplyBaseConvertPlugin extends AbstractTaskPlugin {
 
     if (isNew || !cert.pfx) {
       try {
+        // 命令注入防护：CertConverter 会把这两个值拼进 shell 命令执行
+        assertSafePfxConvert(this.pfxArgs, this.pfxPassword);
         const converter = new CertConverter({ logger: this.logger });
         const res = await converter.convert({
           cert,

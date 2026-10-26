@@ -35,19 +35,62 @@ export class HostWhitelist {
     this.enabled = entries.length > 0;
   }
 
+  /** 内网/保留地址段，无论白名单是否配置都默认拒绝（需显式加白名单放行） */
+  private static readonly INTERNAL_IPV4 = new net.BlockList();
+  private static readonly INTERNAL_IPV6 = new net.BlockList();
+  static {
+    const v4 = HostWhitelist.INTERNAL_IPV4;
+    v4.addSubnet("0.0.0.0", 8, "ipv4");
+    v4.addSubnet("10.0.0.0", 8, "ipv4");
+    v4.addSubnet("100.64.0.0", 10, "ipv4"); // CGNAT
+    v4.addSubnet("127.0.0.0", 8, "ipv4");
+    v4.addSubnet("169.254.0.0", 16, "ipv4"); // 链路本地，含云元数据 169.254.169.254
+    v4.addSubnet("172.16.0.0", 12, "ipv4");
+    v4.addSubnet("192.0.0.0", 24, "ipv4");
+    v4.addSubnet("192.168.0.0", 16, "ipv4");
+    v4.addSubnet("198.18.0.0", 15, "ipv4");
+    v4.addSubnet("224.0.0.0", 4, "ipv4"); // 组播
+    v4.addSubnet("240.0.0.0", 4, "ipv4"); // 保留
+    const v6 = HostWhitelist.INTERNAL_IPV6;
+    v6.addAddress("::1", "ipv6");
+    v6.addAddress("::", "ipv6");
+    v6.addSubnet("fc00::", 7, "ipv6"); // 唯一本地地址
+    v6.addSubnet("fe80::", 10, "ipv6"); // 链路本地
+  }
+
+  /** 是否为内网/保留地址 */
+  static isInternalIp(ip: string, family: "ipv4" | "ipv6"): boolean {
+    const list = family === "ipv4" ? HostWhitelist.INTERNAL_IPV4 : HostWhitelist.INTERNAL_IPV6;
+    if (list.check(ip, family)) {
+      return true;
+    }
+    // IPv4-mapped IPv6（::ffff:10.1.2.3）按 IPv4 再判一次
+    if (family === "ipv6") {
+      const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+      if (mapped) {
+        return HostWhitelist.INTERNAL_IPV4.check(mapped[1], "ipv4");
+      }
+    }
+    return false;
+  }
+
   /**
    * 判断目标主机是否允许访问
    * @param host 域名或IP
    */
   isAllowed(host?: string): boolean {
-    if (!this.enabled) {
-      return true;
-    }
     const normalized = HostWhitelist.normalizeHost(host);
     if (!normalized) {
       return false;
     }
     const ipFamily = HostWhitelist.ipFamily(normalized);
+    // 内网地址默认拒绝（SSRF防护），白名单里的 IP/CIDR 条目可显式放行
+    if (ipFamily && HostWhitelist.isInternalIp(normalized, ipFamily)) {
+      return this.blockList.check(normalized, ipFamily);
+    }
+    if (!this.enabled) {
+      return true;
+    }
     if (ipFamily) {
       // 目标是IP字面量，仅按 IP/CIDR 条目匹配
       return this.blockList.check(normalized, ipFamily);

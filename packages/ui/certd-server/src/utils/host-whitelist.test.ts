@@ -6,16 +6,32 @@ import assert from "node:assert/strict";
 import { HostWhitelist } from "./host-whitelist.js";
 
 describe("HostWhitelist", () => {
-  it("空白名单不限制任何目标", () => {
+  it("空白名单放行公网目标，但仍拒绝内网地址", () => {
     assert.equal(new HostWhitelist().enabled, false);
     assert.equal(new HostWhitelist("").enabled, false);
     assert.equal(new HostWhitelist("  , ,").enabled, false);
     assert.equal(new HostWhitelist([]).enabled, false);
 
     const whitelist = new HostWhitelist();
-    assert.equal(whitelist.isAllowed("192.168.1.1"), true);
     assert.equal(whitelist.isAllowed("example.com"), true);
-    assert.equal(whitelist.isAllowed(undefined), true);
+    assert.equal(whitelist.isAllowed("8.8.8.8"), true);
+    // 内网/保留地址默认拒绝（SSRF防护），不受白名单开关影响
+    assert.equal(whitelist.isAllowed("192.168.1.1"), false);
+    assert.equal(whitelist.isAllowed("127.0.0.1"), false);
+    assert.equal(whitelist.isAllowed("169.254.169.254"), false);
+    assert.equal(whitelist.isAllowed("10.0.0.1"), false);
+    assert.equal(whitelist.isAllowed("::1"), false);
+    assert.equal(whitelist.isAllowed("fd00::1"), false);
+    // 无法归一化的输入按拒绝处理
+    assert.equal(whitelist.isAllowed(undefined), false);
+  });
+
+  it("内网地址可通过白名单显式放行", () => {
+    const whitelist = new HostWhitelist("192.168.1.0/24,10.0.0.5");
+    assert.equal(whitelist.isAllowed("192.168.1.100"), true);
+    assert.equal(whitelist.isAllowed("10.0.0.5"), true);
+    assert.equal(whitelist.isAllowed("10.0.0.6"), false);
+    assert.equal(whitelist.isAllowed("192.168.2.1"), false);
   });
 
   it("精确域名匹配，大小写不敏感", () => {
@@ -89,9 +105,11 @@ describe("HostWhitelist", () => {
     assert.throws(() => whitelist.assertAllowed("192.168.1.1"), /不在站点监控白名单内/);
     assert.throws(() => whitelist.assertAllowed(undefined), /不在站点监控白名单内/);
 
-    // 空白名单不抛异常
+    // 空白名单放行公网目标
     const empty = new HostWhitelist("");
-    empty.assertAllowed("192.168.1.1");
+    empty.assertAllowed("example.com");
+    // 但内网地址仍被拒绝
+    assert.throws(() => empty.assertAllowed("192.168.1.1"), /不在站点监控白名单内/);
   });
 
   it("支持数组形式配置", () => {

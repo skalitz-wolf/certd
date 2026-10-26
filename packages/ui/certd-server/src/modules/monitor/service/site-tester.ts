@@ -1,6 +1,7 @@
 import { logger, safePromise, utils } from "@certd/basic";
 import { merge } from "lodash-es";
 import https from "https";
+import dns from "dns";
 import { PeerCertificate } from "tls";
 import { DnsCustom } from "./dns-custom.js";
 import { HostWhitelist } from "../../../utils/host-whitelist.js";
@@ -68,6 +69,19 @@ export class SiteTester {
       req
     );
 
+    // SSRF防护（DNS rebinding）：白名单只校验了主机名，实际连到哪个 IP 取决于解析结果。
+    // 用户可把自己的 dnsServer 指向恶意解析器，让白名单域名解析到内网地址，
+    // 因此解析出的每个 IP 也必须过一遍白名单。
+    const whitelist = new HostWhitelist(req.whitelist);
+    const assertResolvedAllowed = (addresses: any[]) => {
+      for (const item of addresses || []) {
+        const address = typeof item === "string" ? item : item?.address;
+        if (address) {
+          whitelist.assertAllowed(address);
+        }
+      }
+    };
+
     let customLookup = null;
     if (req.ipAddress) {
       //使用固定的ip
@@ -82,13 +96,28 @@ export class SiteTester {
       // 非ip address 请求时
       const customDns = req.customDns;
       customLookup = async (hostname: string, options: any, callback) => {
-        console.log(hostname, options);
-
-        // { family: undefined, hints: 0, all: true }
         const res = await customDns.lookup(hostname, options);
-        console.log("custom lookup res:", res);
         if (!res || res.length === 0) {
           callback(new Error("没有解析到IP"));
+          return;
+        }
+        try {
+          assertResolvedAllowed(res);
+        } catch (e) {
+          callback(e);
+          return;
+        }
+        callback(null, res);
+      };
+    } else if (whitelist.enabled) {
+      // 未指定 IP、未使用自定义 DNS：系统解析结果同样要校验
+      customLookup = async (hostname: string, options: any, callback) => {
+        const res = await dns.promises.lookup(hostname, { ...options, all: true } as dns.LookupAllOptions);
+        try {
+          assertResolvedAllowed(res);
+        } catch (e) {
+          callback(e);
+          return;
         }
         callback(null, res);
       };
