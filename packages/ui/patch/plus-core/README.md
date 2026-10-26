@@ -11,9 +11,14 @@
 `verifySignature` 方法放行 `signature` 为哨兵值 `"local-trial"` 的 license，
 其余（包括真实 license 的 RSA-SHA256 验签）逻辑完全不变。
 
-配合 `packages/libs/lib-server` 中 `PlusService.getVipTrial` 的本地试用逻辑：
-它在网络不通时直接构造一个 **7 天后自动过期** 的本地 license（`vipType: "plus"`），
-不走远程接口。过期后 `localVerify` 会判定"授权已过期"退回基础版，想续期需重新构造。
+配合 `packages/ui/certd-server` 中 `SysPlusController.getVipTrial` 的本地试用逻辑：
+它直接构造一个本地 license（`vipType: "plus"`，默认时长 365000 天，可用环境变量
+`CERTD_LOCAL_TRIAL_DAYS` 覆盖），不走远程接口，并写入 `sys.license` 设置持久化。
+
+> 该逻辑必须放在 `packages/ui/certd-server` 里，不能放 `packages/libs/lib-server`：
+> 镜像构建上下文只有 `packages/ui/`，`@certd/*` 依赖从 npm registry 解析，
+> 改 `lib-server` 源码不会进入镜像（2026-10 实测：镜像内仍是 npm 上的原版实现，
+> `getVipTrial` 走远程接口，120 秒后 502）。
 
 ## 同步到本地 node_modules（本地开发时）
 
@@ -27,7 +32,7 @@ cp packages/ui/patch/plus-core/index.js \
 ## Docker 镜像
 
 `packages/ui/Dockerfile` 已在运行时阶段加入拷贝步骤（glob 匹配任意 plus-core 版本），
-构建出的镜像自带本补丁，无需手动操作。
+并校验补丁确实生效，否则构建失败。构建出的镜像自带本补丁，无需手动操作。
 
 ## 注意
 
