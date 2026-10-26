@@ -36,6 +36,9 @@ test.js
 pnpm-lock.yaml
 .studio/
 
+# 镜像构建用的依赖锁文件必须入库，否则换机器构建时版本会漂移
+!packages/ui/vendor/pnpm-lock.yaml
+
 # Certd 推广报告，仅本地使用
 /popularize/reports/
 output/

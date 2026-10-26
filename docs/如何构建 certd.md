@@ -60,6 +60,7 @@ pnpm build
 cd packages/ui
 
 podman build --platform linux/amd64 \
+  --build-arg GIT_REVISION=$(git rev-parse HEAD) \
   -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 \
   -f Dockerfile .
 ```
@@ -79,12 +80,14 @@ podman build --platform linux/amd64 \
 | --- | --- | --- |
 | `CERTD_DEP_VERSION` | `1.42.6` | `@certd/*` 依赖的版本，升级上游时同步修改 |
 | `base_type` | `alpine` | 可选 `alpine` / `slim`（slim 走 `node:22-trixie-slim`） |
+| `GIT_REVISION` | `unknown` | 写入 `org.opencontainers.image.revision` 标签，用 `git rev-parse HEAD` 传入，便于反查线上镜像是哪份代码构建的 |
 
 用法：
 
 ```bash
 podman build --platform linux/amd64 \
   --build-arg CERTD_DEP_VERSION=1.42.6 \
+  --build-arg GIT_REVISION=$(git rev-parse HEAD) \
   -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 \
   -f Dockerfile .
 ```
@@ -155,6 +158,7 @@ cd packages/ui/certd-client && pnpm install && pnpm build
 
 # 3. 构建镜像
 cd packages/ui && podman build --platform linux/amd64 \
+  --build-arg GIT_REVISION=$(git rev-parse HEAD) \
   -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 -f Dockerfile .
 
 # 4. 推送

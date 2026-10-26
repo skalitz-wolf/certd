@@ -77,6 +77,11 @@ EXPOSE 7002
 
 ARG base_type=alpine
 
+# 记录构建来源的提交，便于反查线上镜像是哪份代码构建的。
+# 构建时传入：--build-arg GIT_REVISION=$(git rev-parse HEAD)
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.revision=$GIT_REVISION
+
 # 根据基础镜像发行版选择包管理器
 # trixie-slim -> apt-get, alpine -> apk
 RUN if [ -f /etc/alpine-release ]; then \
