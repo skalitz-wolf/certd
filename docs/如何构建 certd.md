@@ -61,7 +61,7 @@ cd packages/ui
 
 podman build --platform linux/amd64 \
   --build-arg GIT_REVISION=$(git rev-parse HEAD) \
-  -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 \
+  -t harbor.jxlife.com.cn/jxlife/certd:1.42.6.2 \
   -f Dockerfile .
 ```
 
@@ -70,9 +70,26 @@ podman build --platform linux/amd64 \
 | 参数 | 说明 |
 | --- | --- |
 | `--platform linux/amd64` | 目标平台。生产环境是 x86_64，本机是 arm 或 WSL2 时也必须显式指定 |
-| `-t <仓库>:<标签>` | 镜像名。注意 `public` 是 Harbor 的 project 22 |
+| `-t <仓库>:<标签>` | 镜像名。仓库用 `jxlife/certd`（project 7） |
 | `-f Dockerfile` | 相对 `packages/ui/` 的 Dockerfile 路径 |
 | `.` | 构建上下文。**必须是 `packages/ui/`，不能是仓库根目录** |
+
+### 3.1.1 标签命名约定
+
+**标签不带 `v` 前缀**，与上游官方镜像保持一致。上游 CI 直接从
+`packages/ui/certd-server/package.json` 的 `version` 字段取标签（见
+`.github/workflows/release-image.yml`），该字段的值形如 `1.45.5`，没有 `v`。
+
+我们自己构建的版本在基线版本后加小版本号：
+
+| 标签 | 含义 |
+| --- | --- |
+| `1.42.6` | 上游原版，由上游 CI 推送 |
+| `1.42.6.1` | 我们基于 1.42.6 的第一次自定义构建 |
+| `1.42.6.2` | 第二次，依此类推 |
+
+`v1.42.6.2` 这类带 `v` 的标签已全部清理，不要再推。git tag 仍然是 `v1.42.6`
+格式，两者不一致是有意的：git tag 跟上游，镜像 tag 跟上游镜像。
 
 ### 3.2 可覆盖的构建参数
 
@@ -88,7 +105,7 @@ podman build --platform linux/amd64 \
 podman build --platform linux/amd64 \
   --build-arg CERTD_DEP_VERSION=1.42.6 \
   --build-arg GIT_REVISION=$(git rev-parse HEAD) \
-  -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 \
+  -t harbor.jxlife.com.cn/jxlife/certd:1.42.6.2 \
   -f Dockerfile .
 ```
 
@@ -109,10 +126,10 @@ podman build --platform linux/amd64 \
 
 ```bash
 # 查看镜像大小
-podman images harbor.jxlife.com.cn/public/certd
+podman images harbor.jxlife.com.cn/jxlife/certd
 
 # 验证关键产物
-podman run --rm --platform linux/amd64 harbor.jxlife.com.cn/public/certd:v1.42.6.2 sh -c "
+podman run --rm --platform linux/amd64 harbor.jxlife.com.cn/jxlife/certd:1.42.6.2 sh -c "
   node -v
   node -e \"require('better-sqlite3'); console.log('better-sqlite3 OK')\"
   ls /app/tools/lego /app/tools/jks-go
@@ -126,7 +143,7 @@ podman run --rm --platform linux/amd64 harbor.jxlife.com.cn/public/certd:v1.42.6
 
 ```bash
 podman run --rm --platform linux/amd64 -d --name certd-smoke \
-  harbor.jxlife.com.cn/public/certd:v1.42.6.2
+  harbor.jxlife.com.cn/jxlife/certd:1.42.6.2
 
 sleep 40
 podman logs certd-smoke | tail -20
@@ -138,13 +155,13 @@ podman rm -f certd-smoke
 ## 五、推送镜像
 
 ```bash
-podman push harbor.jxlife.com.cn/public/certd:v1.42.6.2
+podman push harbor.jxlife.com.cn/jxlife/certd:1.42.6.2
 ```
 
 确认远端已存在该标签：
 
 ```bash
-podman search --list-tags harbor.jxlife.com.cn/public/certd
+podman search --list-tags harbor.jxlife.com.cn/jxlife/certd
 ```
 
 ## 六、完整命令速查
@@ -159,13 +176,13 @@ cd packages/ui/certd-client && pnpm install && pnpm build
 # 3. 构建镜像
 cd packages/ui && podman build --platform linux/amd64 \
   --build-arg GIT_REVISION=$(git rev-parse HEAD) \
-  -t harbor.jxlife.com.cn/public/certd:v1.42.6.2 -f Dockerfile .
+  -t harbor.jxlife.com.cn/jxlife/certd:1.42.6.2 -f Dockerfile .
 
 # 4. 推送
-podman push harbor.jxlife.com.cn/public/certd:v1.42.6.2
+podman push harbor.jxlife.com.cn/jxlife/certd:1.42.6.2
 
 # 5. 确认
-podman search --list-tags harbor.jxlife.com.cn/public/certd
+podman search --list-tags harbor.jxlife.com.cn/jxlife/certd
 ```
 
 ## 七、升级维护
@@ -258,5 +275,5 @@ podman run -d \
   -e CERTD_DBTOOL_ENABLED=true \
   -e CERTD_REDISTOOL_ENABLED=true \
   -p 7001:7001 -p 7002:7002 \
-  harbor.jxlife.com.cn/public/certd:v1.42.6.2
+  harbor.jxlife.com.cn/jxlife/certd:1.42.6.2
 ```
