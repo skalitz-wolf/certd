@@ -1,6 +1,7 @@
 packages:
   - 'packages/**' # <--------------开发插件请注释掉这一行，PR时本修改不要提交
   - 'packages/ui/**'
+  - '!packages/ui/vendor'
   - '!**/test/**'
   - '!packages/libs/libs/lib-huawei'
   - '!packages/libs/libs/lib-iframe'
