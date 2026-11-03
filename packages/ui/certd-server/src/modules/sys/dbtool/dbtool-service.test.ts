@@ -9,7 +9,7 @@ describe("dbtool checkStatementAllowed", () => {
   it("放行 SELECT/SHOW/DESC/EXPLAIN/INSERT/UPDATE", () => {
     assert.doesNotThrow(() => checkStatementAllowed("select 1"));
     assert.doesNotThrow(() => checkStatementAllowed(" INSERT INTO t values (1)"));
-    assert.doesNotThrow(() => checkStatementAllowed("update t set a = 1"));
+    assert.doesNotThrow(() => checkStatementAllowed("update t set a = 1 where id = 1"));
     assert.doesNotThrow(() => checkStatementAllowed("show tables"));
     assert.doesNotThrow(() => checkStatementAllowed("desc t"));
     assert.doesNotThrow(() => checkStatementAllowed("explain select 1"));
@@ -36,7 +36,7 @@ describe("dbtool checkStatementAllowed", () => {
 
   it("字符串字面量里的关键词不影响判断", () => {
     assert.doesNotThrow(() => checkStatementAllowed("select 'delete from t'"));
-    assert.doesNotThrow(() => checkStatementAllowed("update t set note = 'truncate'"));
+    assert.doesNotThrow(() => checkStatementAllowed("update t set note = 'truncate' where id = 1"));
   });
 
   it("firstKeyword 取首词并大写", () => {
@@ -44,6 +44,44 @@ describe("dbtool checkStatementAllowed", () => {
     assert.equal(firstKeyword("-- x\nupdate t"), "UPDATE");
     assert.equal(firstKeyword(" /* c */ # d\n insert into t values (1)"), "INSERT");
     assert.equal(firstKeyword("-- 只有注释"), "");
+  });
+});
+
+describe("dbtool UPDATE 必须带 WHERE", () => {
+  it("无 WHERE 的 UPDATE 拒绝", () => {
+    assert.throws(() => checkStatementAllowed("update t set a = 1"), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("UPDATE t SET a = 1, b = 2"), /WHERE 条件/);
+  });
+
+  it("带 WHERE 的 UPDATE 放行", () => {
+    assert.doesNotThrow(() => checkStatementAllowed("update t set a = 1 where id = 1"));
+    assert.doesNotThrow(() => checkStatementAllowed("UPDATE t SET a = 1 WHERE id IN (SELECT id FROM u WHERE b = 2)"));
+  });
+
+  it("子查询里的 WHERE 不算外层条件", () => {
+    assert.throws(() => checkStatementAllowed("update t set a = (select b from u where u.id = 1)"), /WHERE 条件/);
+  });
+
+  it("字符串、反引号、注释里的 where 不影响判断", () => {
+    assert.throws(() => checkStatementAllowed("update t set note = 'where id = 1'"), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("update t set note = \"where id = 1\""), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("update `where` set a = 1"), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 -- where id = 1\n"), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 # where id = 1\n"), /WHERE 条件/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 /* where id = 1 */"), /WHERE 条件/);
+    assert.doesNotThrow(() => checkStatementAllowed("update t set a = 1 /* where */ where id = 1"));
+    // 反斜杠转义与双写转义
+    assert.doesNotThrow(() => checkStatementAllowed("update t set note = 'a\\'b where' where id = 1"));
+    assert.doesNotThrow(() => checkStatementAllowed("update t set note = 'it''s where' where id = 1"));
+  });
+
+  it("恒真条件视为无 WHERE 拒绝", () => {
+    assert.throws(() => checkStatementAllowed("update t set a = 1 where 1 = 1"), /恒真/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 where TRUE"), /恒真/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 where (1=1)"), /恒真/);
+    assert.throws(() => checkStatementAllowed("update t set a = 1 where 23=23"), /恒真/);
+    // 组合条件里含恒真项但存在真实条件，放行
+    assert.doesNotThrow(() => checkStatementAllowed("update t set a = 1 where 1 = 1 and id = 2"));
   });
 });
 

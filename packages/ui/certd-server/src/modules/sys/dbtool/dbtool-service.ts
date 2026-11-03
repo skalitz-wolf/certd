@@ -46,6 +46,133 @@ export function checkStatementAllowed(sql: string): void {
   if (!ALLOWED_STATEMENTS.includes(keyword)) {
     throw new CommonException(`不允许执行该语句，仅支持 ${ALLOWED_STATEMENTS.join(" / ")}`);
   }
+  // UPDATE 影响全表的风险远高于 SELECT 类语句，必须带生效条件
+  if (keyword === "UPDATE") {
+    assertUpdateHasWhere(sql);
+  }
+}
+
+/**
+ * 把字符串字面量（'...'、"..."、`...`）和注释（--、#、/* *​/）替换为等长空格，
+ * 保留其余字符与位置，便于后续按位置扫描括号深度和关键词。
+ * 支持 MySQL 的两种转义：反斜杠（\'）和双写（''）。
+ */
+export function blankStringsAndComments(sql: string): string {
+  const chars = sql.split("");
+  let i = 0;
+  while (i < chars.length) {
+    const c = chars[i];
+    if (c === "'" || c === '"' || c === "`") {
+      chars[i] = " ";
+      i++;
+      while (i < chars.length) {
+        if (chars[i] === "\\") {
+          // 反斜杠转义，连同被转义字符一起置空
+          chars[i] = " ";
+          if (i + 1 < chars.length) {
+            chars[i + 1] = " ";
+          }
+          i += 2;
+          continue;
+        }
+        if (chars[i] === c) {
+          if (chars[i + 1] === c) {
+            // 双写转义（''），两个都置空后继续在字符串内
+            chars[i] = " ";
+            chars[i + 1] = " ";
+            i += 2;
+            continue;
+          }
+          // 字符串正常结束
+          chars[i] = " ";
+          i++;
+          break;
+        }
+        chars[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    // MySQL 的 -- 注释要求后面跟空白或行尾（否则是减号运算）
+    if (c === "-" && chars[i + 1] === "-" && (chars[i + 2] === undefined || /\s/.test(chars[i + 2]))) {
+      while (i < chars.length && chars[i] !== "\n") {
+        chars[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    if (c === "#") {
+      while (i < chars.length && chars[i] !== "\n") {
+        chars[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    if (c === "/" && chars[i + 1] === "*") {
+      chars[i] = " ";
+      chars[i + 1] = " ";
+      i += 2;
+      while (i < chars.length) {
+        if (chars[i] === "*" && chars[i + 1] === "/") {
+          chars[i] = " ";
+          chars[i + 1] = " ";
+          i += 2;
+          break;
+        }
+        chars[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return chars.join("");
+}
+
+function countChar(s: string, ch: string): number {
+  let n = 0;
+  for (const c of s) {
+    if (c === ch) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/**
+ * 判断 WHERE 子句是否恒真（如 1=1、true、(1=1)、23=23）。
+ * 只做保守判断：完整的恒真表达式才命中；
+ * “恒真项 AND 真实条件”的组合不受影响。
+ */
+function isTriviallyTrueWhere(whereClause: string): boolean {
+  const normalized = whereClause.toLowerCase().replace(/\s+/g, "");
+  // 去掉首尾包裹的括号（子句可能带有 order by / limit，此时不会被这些形态命中）
+  const body = normalized.replace(/^\(+/, "").replace(/\)+$/, "");
+  return body === "true" || body === "1" || /^(\d+)=\1$/.test(body);
+}
+
+/**
+ * UPDATE 必须在顶层（括号深度 0）带 WHERE 条件，且条件不能恒真。
+ * 子查询里的 WHERE 不算外层条件；字符串/反引号/注释里的 where 已被置空，不参与判定。
+ */
+export function assertUpdateHasWhere(sql: string): void {
+  const stripped = blankStringsAndComments(sql);
+  const whereRegex = /\bwhere\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = whereRegex.exec(stripped)) !== null) {
+    const before = stripped.slice(0, match.index);
+    const depth = countChar(before, "(") - countChar(before, ")");
+    if (depth !== 0) {
+      // 子查询里的 WHERE，继续找外层
+      continue;
+    }
+    const whereClause = stripped.slice(match.index + match[0].length);
+    if (isTriviallyTrueWhere(whereClause)) {
+      throw new CommonException("UPDATE 的 WHERE 条件恒真（如 1=1），等同于无条件全表更新，已拒绝");
+    }
+    return;
+  }
+  throw new CommonException("UPDATE 语句必须带 WHERE 条件，不允许无条件的全表更新");
 }
 
 export function validateDbExecReq(req: DbExecReq): void {

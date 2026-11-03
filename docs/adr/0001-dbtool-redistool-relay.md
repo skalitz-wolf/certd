@@ -6,7 +6,7 @@ certd fork 里加了两个代执行接口：`POST /api/sys/dbtool/exec`(MySQL) �
 
 - **环境变量开关默认关闭**：分别由 `CERTD_DBTOOL_ENABLED=true` / `CERTD_REDISTOOL_ENABLED=true` 开启；关闭时返回与不存在路由完全一致的 404，黑盒探测无法区分存在性。
 - **guest 路由 + 手工验票**：不走 authOnly 中间件（那样未登录探测会拿到 401 暴露存在性），controller 内手工验 JWT、要求管理员角色（roles 含 1）。代价：不支持 x-certd-token 永久 Key，只能用 7 天有效的登录 token。
-- **白名单**：MySQL 剥掉开头注释后取首词，只放行 `SELECT / SHOW / DESC / DESCRIBE / EXPLAIN / INSERT / UPDATE`；Redis 只放行固定的 40 余个日常命令（GET/SCAN/HGETALL/SET/HSET/DEL 等），`FLUSHALL / FLUSHDB / SHUTDOWN / CONFIG / DEBUG / SCRIPT / EVAL` 等均在白名单外。
+- **白名单**：MySQL 剥掉开头注释后取首词，只放行 `SELECT / SHOW / DESC / DESCRIBE / EXPLAIN / INSERT / UPDATE`；其中 **UPDATE 必须在顶层（括号深度 0）带 WHERE 条件，且条件不能恒真（如 `1=1`）**，字符串/反引号/注释里的 where 不参与判定，子查询里的 WHERE 不算外层条件；Redis 只放行固定的 40 余个日常命令（GET/SCAN/HGETALL/SET/HSET/DEL 等），`FLUSHALL / FLUSHDB / SHUTDOWN / CONFIG / DEBUG / SCRIPT / EVAL` 等均在白名单外。
 
 2026-10-26 最初实现的是 MySQL 黑名单（只拦 DELETE/TRUNCATE/DROP），同日改为白名单，理由是黑名单挂一漏万（ALTER/GRANT/CREATE/CALL 都不在列）。Redis 从一开始就是白名单。
 
