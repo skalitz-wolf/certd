@@ -32,12 +32,12 @@ ls -lh packages/ui/vendor/
 | 文件 | 大小 | 说明 |
 | --- | --- | --- |
 | `pnpm-lock.yaml` | ~240 KB | 锁定全部依赖版本，避免构建时做版本解析 |
-| `package.json` | ~7 KB | 已把 `@certd/*` 固定到 `CERTD_DEP_VERSION` |
+| `package.json` | ~7 KB | certd-server package.json 的快照，`@certd/*` 固定到当前基线版本（1.42.6） |
 | `lego_v4.30.1_linux_amd64.tar.gz` | ~19 MB | lego 二进制包 |
 | `jks-go_linux_amd64` | ~3.1 MB | jks-go 二进制 |
 | `better-sqlite3-v11.10.0-node-v127-linuxmusl-x64.tar.gz` | ~1.2 MB | better-sqlite3 预编译产物 |
 
-> 这些文件预置在仓库里，是为了让构建过程不依赖 GitHub / npmmirror 的连通性。
+> 这些文件预置在仓库里，目标是**消除对 GitHub release 下载的依赖并提升构建速度**（依赖 tarball 仍来自 npmmirror，apk/apt 仍走华为云镜像，不是完全离线构建）。
 > 详见文末「为什么依赖要预置在 vendor」。
 
 ## 二、构建前端
@@ -69,7 +69,7 @@ podman build --platform linux/amd64 \
 
 | 参数 | 说明 |
 | --- | --- |
-| `--platform linux/amd64` | 目标平台。生产环境是 x86_64，本机是 arm 或 WSL2 时也必须显式指定 |
+| `--platform linux/amd64` | 目标平台。**本 Dockerfile 仅支持 linux/amd64 + alpine**：vendor 只预置了 amd64 产物，其他架构会在构建早期失败；slim（`base_type=slim`）已不再维护，构建期会直接报错 |
 | `-t <仓库>:<标签>` | 镜像名。仓库用 `jxlife/certd`（project 7） |
 | `-f Dockerfile` | 相对 `packages/ui/` 的 Dockerfile 路径 |
 | `.` | 构建上下文。**必须是 `packages/ui/`，不能是仓库根目录** |
@@ -95,15 +95,13 @@ podman build --platform linux/amd64 \
 
 | ARG | 默认值 | 说明 |
 | --- | --- | --- |
-| `CERTD_DEP_VERSION` | `1.42.6` | `@certd/*` 依赖的版本，升级上游时同步修改 |
-| `base_type` | `alpine` | 可选 `alpine` / `slim`（slim 走 `node:22-trixie-slim`） |
+| `base_type` | `alpine` | 仅支持 `alpine`；`slim` 已不再维护（vendor 的 better-sqlite3 预编译产物是 musl 版），构建期会报错 |
 | `GIT_REVISION` | `unknown` | 写入 `org.opencontainers.image.revision` 标签，用 `git rev-parse HEAD` 传入，便于反查线上镜像是哪份代码构建的 |
 
 用法：
 
 ```bash
 podman build --platform linux/amd64 \
-  --build-arg CERTD_DEP_VERSION=1.42.6 \
   --build-arg GIT_REVISION=$(git rev-parse HEAD) \
   -t harbor.jxlife.com.cn/jxlife/certd:1.42.6.2 \
   -f Dockerfile .
@@ -189,7 +187,7 @@ podman search --list-tags harbor.jxlife.com.cn/jxlife/certd
 
 ### 7.1 升级上游版本
 
-1. 修改 `packages/ui/Dockerfile` 里的 `ARG CERTD_DEP_VERSION`
+1. merge 上游后确认 `packages/ui/certd-server/package.json` 的 `version` 已是新版本；构建期会校验它与 `vendor/package.json` 一致，不一致会直接报错
 2. 重新生成 `packages/ui/vendor/pnpm-lock.yaml` 和 `package.json`：
 
 ```bash
@@ -229,7 +227,7 @@ curl -sSL -o packages/ui/vendor/better-sqlite3-v<版本>-node-v127-linuxmusl-x64
   "https://registry.npmmirror.com/-/binary/better-sqlite3/v<版本>/better-sqlite3-v<版本>-node-v127-linuxmusl-x64.tar.gz"
 ```
 
-并同步修改 Dockerfile 里 `--mount=type=bind,source=vendor/better-sqlite3-...` 的文件名。
+并同步修改 Dockerfile 里 `--mount=type=bind,source=vendor/better-sqlite3-...` 的文件名（构建期会校验 lockfile 与 vendor 文件名里的版本一致，不一致会直接报错）。
 
 ### 7.2 升级 lego / jks-go
 
@@ -243,7 +241,7 @@ curl -sSL -o packages/ui/vendor/better-sqlite3-v<版本>-node-v127-linuxmusl-x64
 | 问题 | 原因 | 处理 |
 | --- | --- | --- |
 | `ERR_PNPM_NO_MATCHING_VERSION @certd/plus-core@^1.45.5` | 构建上下文只有 `packages/ui/`，容器内没有 workspace 的 `@certd/*` 包，会从 npm 解析到最新版；而最新版 `lib-server@1.45.5` 依赖尚未发布的 `plus-core@^1.45.5` | vendor 里的 `package.json` 固定版本 |
-| `apk add` 超时 / `TLS: unspecified error` | 基础镜像的源指向 `dl-cdn.alpinelinux.org`，容器内不通 | 换成 `http://mirrors.huaweicloud.com`（注意是 http） |
+| `apk add` 超时 / `TLS: unspecified error` | 基础镜像的源指向 `dl-cdn.alpinelinux.org`，容器内不通 | 换成 `https://mirrors.huaweicloud.com`（早期曾用 http，后改回 https 避免构建期明文下载） |
 | `better-sqlite3` 报 `gyp ERR! find Python` | `.npmrc` 把预编译下载地址指向 npmmirror，该地址在容器内 TLS 会被重置；失败后回退 node-gyp 编译，而 alpine 无 python/g++ | vendor 预置预编译产物 + `--ignore-scripts` 手工解压 |
 | `prebuild-install warn install Request timed out` | 去掉 npmmirror 地址后走 GitHub，网络不稳定，19MB 文件经常超时 | 同上，彻底不下载 |
 | lego / jks-go 下载极慢 | 容器内直连 GitHub release 很慢（19MB 文件 90 秒才 13%） | vendor 预置二进制 |
